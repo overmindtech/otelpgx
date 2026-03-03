@@ -1,4 +1,4 @@
-[![Go Reference](https://pkg.go.dev/badge/github.com/exaring/otelpgx.svg)](https://pkg.go.dev/github.com/exaring/otelpgx)
+[![Go Reference](https://pkg.go.dev/badge/github.com/overmindtech/otelpgx.svg)](https://pkg.go.dev/github.com/overmindtech/otelpgx)
 
 # otelpgx
 
@@ -21,7 +21,7 @@ go get github.com/jackc/pgx/v5
 Install the library:
 
 ```go
-go get github.com/exaring/otelpgx
+go get github.com/overmindtech/otelpgx
 ```
 
 Create the tracer as part of your connection:

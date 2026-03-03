@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/exaring/otelpgx"
+	"github.com/overmindtech/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"

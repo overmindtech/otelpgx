@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	tracerName = "github.com/exaring/otelpgx"
-	meterName  = "github.com/exaring/otelpgx"
+	tracerName = "github.com/overmindtech/otelpgx"
+	meterName  = "github.com/overmindtech/otelpgx"
 )
 
 const (

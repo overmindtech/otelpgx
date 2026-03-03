@@ -1,4 +1,4 @@
-module github.com/exaring/otelpgx
+module github.com/overmindtech/otelpgx
 
 go 1.22.0
 
