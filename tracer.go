@@ -52,6 +52,9 @@ const (
 	PGXOperationTypeKey = attribute.Key("pgx.operation.type")
 	// DBClientOperationErrorsKey represents the count of operation errors
 	DBClientOperationErrorsKey = attribute.Key("db.client.operation.errors")
+	// PrepareDurationKey records the wall-clock time of a prepared-statement
+	// round-trip, in milliseconds, as an attribute on the parent query span.
+	PrepareDurationKey = attribute.Key("pgx.prepare.duration")
 )
 
 type startTimeCtxKey struct{}
@@ -530,116 +533,41 @@ func (t *Tracer) TraceConnectEnd(ctx context.Context, data pgx.TraceConnectEndDa
 // TracePrepareStart is called at the beginning of Prepare calls. The returned
 // context is used for the rest of the call and will be passed to
 // TracePrepareEnd.
-func (t *Tracer) TracePrepareStart(ctx context.Context, conn *pgx.Conn, data pgx.TracePrepareStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
-
-	if !trace.SpanFromContext(ctx).IsRecording() {
-		return ctx
-	}
-
-	optsP := t.spanStartOptionsPool.Get().(*[]trace.SpanStartOption)
-	defer t.spanStartOptionsPool.Put(optsP)
-	attrsP := t.attributeSlicePool.Get().(*[]attribute.KeyValue)
-	defer t.attributeSlicePool.Put(attrsP)
-
-	// reslice to empty
-	opts := (*optsP)[:0]
-	attrs := (*attrsP)[:0]
-
-	attrs = append(attrs, t.tracerAttrs...)
-
-	if data.Name != "" {
-		attrs = append(attrs, PrepareStmtNameKey.String(data.Name))
-	}
-
-	if t.logConnectionDetails && conn != nil {
-		attrs = append(attrs, connectionAttributesFromConfig(conn.Config())...)
-	}
-
-	attrs = append(attrs, semconv.DBOperationName(t.spanNameCtxFunc(ctx, data.SQL)))
-
-	if t.logSQLStatement {
-		attrs = append(attrs, semconv.DBQueryText(data.SQL))
-	}
-
-	opts = append(opts,
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(attrs...),
-	)
-
-	spanName := data.SQL
-	if t.trimQuerySpanName {
-		spanName = t.spanNameCtxFunc(ctx, data.SQL)
-	}
-	if t.prefixQuerySpanName {
-		spanName = "prepare " + spanName
-	}
-
-	ctx, _ = t.tracer.Start(ctx, spanName, opts...)
-
-	return ctx
+//
+// No span is created for prepare. Instead, the prepare duration is recorded as
+// the pgx.prepare.duration attribute (milliseconds) on the parent query span.
+func (t *Tracer) TracePrepareStart(ctx context.Context, _ *pgx.Conn, _ pgx.TracePrepareStartData) context.Context {
+	return context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 }
 
 // TracePrepareEnd is called at the end of Prepare calls.
 func (t *Tracer) TracePrepareEnd(ctx context.Context, _ *pgx.Conn, data pgx.TracePrepareEndData) {
-	span := trace.SpanFromContext(ctx)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationPrepare)
 	t.recordOperationDuration(ctx, pgxOperationPrepare)
 
-	if !span.IsRecording() {
-		return
+	if startTime, ok := ctx.Value(startTimeCtxKey{}).(time.Time); ok {
+		span := trace.SpanFromContext(ctx)
+		if span.IsRecording() {
+			span.SetAttributes(PrepareDurationKey.Int64(time.Since(startTime).Milliseconds()))
+		}
 	}
-
-	recordSpanError(span, data.Err)
-	span.End()
 }
 
 // TraceAcquireStart is called at the beginning of Acquire.
 // The returned context is used for the rest of the call and will be passed to the TraceAcquireEnd.
-func (t *Tracer) TraceAcquireStart(ctx context.Context, pool *pgxpool.Pool, data pgxpool.TraceAcquireStartData) context.Context {
-	ctx = context.WithValue(ctx, startTimeCtxKey{}, time.Now())
-
-	if !trace.SpanFromContext(ctx).IsRecording() {
-		return ctx
-	}
-
-	optsP := t.spanStartOptionsPool.Get().(*[]trace.SpanStartOption)
-	defer t.spanStartOptionsPool.Put(optsP)
-	attrsP := t.attributeSlicePool.Get().(*[]attribute.KeyValue)
-	defer t.attributeSlicePool.Put(attrsP)
-
-	// reslice to empty
-	opts := (*optsP)[:0]
-	attrs := (*attrsP)[:0]
-
-	attrs = append(attrs, t.tracerAttrs...)
-
-	if t.logConnectionDetails && pool != nil && pool.Config() != nil && pool.Config().ConnConfig != nil {
-		attrs = append(attrs, connectionAttributesFromConfig(pool.Config().ConnConfig)...)
-	}
-
-	opts = append(opts,
-		trace.WithSpanKind(trace.SpanKindClient),
-		trace.WithAttributes(attrs...),
-	)
-
-	ctx, _ = t.tracer.Start(ctx, "pool.acquire", opts...)
-
-	return ctx
+//
+// No span is created for pool.acquire. Pool acquire duration is tracked via the
+// db.client.operation.duration metric (pgx.operation.type=acquire) and the pgxpool.*
+// metrics from RecordStats. As a span it adds noise without actionable signal; pool
+// contention is an environmental concern better diagnosed from aggregate metrics.
+func (t *Tracer) TraceAcquireStart(ctx context.Context, _ *pgxpool.Pool, _ pgxpool.TraceAcquireStartData) context.Context {
+	return context.WithValue(ctx, startTimeCtxKey{}, time.Now())
 }
 
 // TraceAcquireEnd is called when a connection has been acquired.
 func (t *Tracer) TraceAcquireEnd(ctx context.Context, _ *pgxpool.Pool, data pgxpool.TraceAcquireEndData) {
-	span := trace.SpanFromContext(ctx)
 	t.incrementOperationErrorCount(ctx, data.Err, pgxOperationAcquire)
 	t.recordOperationDuration(ctx, pgxOperationAcquire)
-
-	if !span.IsRecording() {
-		return
-	}
-
-	recordSpanError(span, data.Err)
-	span.End()
 }
 
 func makeParamsAttribute(args []any) attribute.KeyValue {
